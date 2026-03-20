@@ -14,7 +14,7 @@
 #       with:
 #         event_name: ${{ github.event_name }}
 #         worker_url: ${{ vars.WORKER_URL }}
-#         verify_internal: ${{ vars.VERIFY_INTERNAL }}
+#         verify_internal: ${{ vars.VERIFY_INTERNAL || 'false' }}
 #       secrets:
 #         HMAC_SECRET: ${{ secrets.HMAC_SECRET }}
 #

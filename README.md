@@ -6,7 +6,10 @@ Blocks automated PRs by requiring contributors to complete a [Cloudflare Turnsti
 
 ## How it works
 
-When a PR is opened, the bot sets a pending commit status and posts a comment asking the contributor to run `/verify`. This triggers a reply with a pre-filled link to a Cloudflare Worker page. After completing the CAPTCHA, the Worker issues an HMAC-signed token encoding the username, repo, PR number, and a timestamp. The contributor pastes the token as a PR comment, and the Action verifies the signature and fields before marking the status as success.
+1. A PR is opened → bot sets a pending commit status and asks the contributor to run `/verify`
+2. Contributor comments `/verify` → bot replies with a pre-filled link to a Cloudflare Worker page
+3. Contributor completes the CAPTCHA → Worker issues an HMAC-signed token (username + repo + PR number + timestamp)
+4. Contributor pastes the token as a PR comment → Action verifies the signature and fields → sets status to success
 
 The Worker and the GitHub Action share only the HMAC secret — neither holds credentials for the other.
 
@@ -42,7 +45,7 @@ Note your Worker URL (e.g. `https://pr-human-verify.yourname.workers.dev`). The 
 ### 3. Set up Turnstile
 
 1. Go to [Cloudflare Dashboard → Turnstile](https://dash.cloudflare.com/?to=/:account/turnstile) and click **Add site**
-2. Widget mode: **Managed**, domain: your Worker hostname from step 2
+2. Widget mode: **Managed**, hostname: your Worker hostname from step 2
 3. Copy the Site Key and Secret Key, then update the Worker:
 
 ```bash
@@ -76,7 +79,7 @@ jobs:
     with:
       event_name: ${{ github.event_name }}
       worker_url: ${{ vars.WORKER_URL }}
-      verify_internal: ${{ vars.VERIFY_INTERNAL }}
+      verify_internal: ${{ vars.VERIFY_INTERNAL || 'false' }}
     secrets:
       HMAC_SECRET: ${{ secrets.HMAC_SECRET }}
 ```
