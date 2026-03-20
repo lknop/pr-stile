@@ -1,24 +1,48 @@
 # .github/workflows/pr-human-verify.yml
 #
-# Prevents automated PRs by requiring a Cloudflare Turnstile human check.
+# Reusable workflow — in another repo, create a workflow file with:
 #
-# Flow:
-#   1. PR opened → bot sets "pending" status with instructions
-#   2. User comments "/verify" → bot replies with a pre-filled Turnstile link
-#   3. User completes challenge, gets a token, pastes it as a PR comment
-#   4. Bot verifies the HMAC token and sets status to "success"
+#   on:
+#     pull_request:
+#       types: [opened, reopened, synchronize]
+#     issue_comment:
+#       types: [created]
 #
-# Required setup (all in repo Settings → Secrets and variables → Actions):
-#   - Secret:   HMAC_SECRET   (same value used in the Cloudflare Worker)
-#   - Variable: WORKER_URL    (your deployed Worker URL, e.g. https://pr-human-verify.you.workers.dev)
+#   jobs:
+#     verify:
+#       uses: lknop/pr-stile/.github/workflows/pr-human-verify.yml@main
+#       with:
+#         event_name: ${{ github.event_name }}
+#         worker_url: ${{ vars.WORKER_URL }}
+#         verify_internal: ${{ vars.VERIFY_INTERNAL == 'true' }}
+#       secrets:
+#         HMAC_SECRET: ${{ secrets.HMAC_SECRET }}
+#
+# Required setup in your repo (Settings → Secrets and variables → Actions):
+#   - Secret:   HMAC_SECRET      (same value used in the Cloudflare Worker)
+#   - Variable: WORKER_URL       (your deployed Worker URL)
+#   - Variable: VERIFY_INTERNAL  (optional, set to 'true' to verify members/collaborators too)
 
 name: PR Human Verification
 
 on:
-  pull_request:
-    types: [opened, reopened, synchronize]
-  issue_comment:
-    types: [created]
+  workflow_call:
+    inputs:
+      event_name:
+        description: Pass github.event_name from the caller workflow
+        type: string
+        required: true
+      worker_url:
+        description: URL of the deployed Cloudflare Worker
+        type: string
+        required: true
+      verify_internal:
+        description: Require verification from repo members and collaborators too
+        type: boolean
+        default: false
+    secrets:
+      HMAC_SECRET:
+        required: true
 
 permissions:
   pull-requests: write
@@ -26,14 +50,13 @@ permissions:
   issues: write
 
 env:
-  WORKER_URL: ${{ vars.WORKER_URL }}
-  # Set VERIFY_INTERNAL=true to require verification from repo members/collaborators too
-  VERIFY_INTERNAL: ${{ vars.VERIFY_INTERNAL }}
+  WORKER_URL: ${{ inputs.worker_url }}
+  VERIFY_INTERNAL: ${{ inputs.verify_internal }}
 
 jobs:
   # ── On PR open: set pending status with instructions ─────────────────────
   pr-opened:
-    if: github.event_name == 'pull_request'
+    if: inputs.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - name: Set pending status
@@ -70,9 +93,7 @@ jobs:
 
   # ── On comment: handle /verify command or token validation ───────────────
   pr-comment:
-    if: >
-      github.event_name == 'issue_comment' &&
-      github.event.issue.pull_request
+    if: inputs.event_name == 'issue_comment' && github.event.issue.pull_request
     runs-on: ubuntu-latest
     steps:
       - name: Handle comment
