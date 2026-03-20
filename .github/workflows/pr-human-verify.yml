@@ -38,6 +38,8 @@ jobs:
         with:
           script: |
             const sha = context.payload.pull_request.head.sha;
+            const author = context.payload.pull_request.user.login;
+            const prNumber = context.payload.pull_request.number;
 
             await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
@@ -47,6 +49,13 @@ jobs:
               context: "human-verified",
               description: "Comment /verify on this PR to prove you're human",
               target_url: process.env.WORKER_URL,
+            });
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: `@${author} This PR requires human verification. Please comment \`/verify\` to get started.`,
             });
 
   # ── On comment: handle /verify command or token validation ───────────────
