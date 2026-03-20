@@ -74,7 +74,27 @@ wrangler deploy                            # redeploy with the site key
 
 ### 4. Add the GitHub Action to your repo (3 min)
 
-1. Copy `.github/workflows/pr-human-verify.yml` into your repository — no edits needed
+1. Create `.github/workflows/pr-human-verify.yml` in your repository with the following content:
+
+   ```yaml
+   name: PR Human Verification
+
+   on:
+     pull_request:
+       types: [opened, reopened, synchronize]
+     issue_comment:
+       types: [created]
+
+   jobs:
+     verify:
+       uses: lknop/pr-stile/.github/workflows/pr-human-verify.yml@main
+       with:
+         event_name: ${{ github.event_name }}
+         worker_url: ${{ vars.WORKER_URL }}
+         verify_internal: ${{ vars.VERIFY_INTERNAL == 'true' }}
+       secrets:
+         HMAC_SECRET: ${{ secrets.HMAC_SECRET }}
+   ```
 
 2. Go to **Settings → Secrets and variables → Actions** and add:
 
@@ -83,6 +103,7 @@ wrangler deploy                            # redeploy with the site key
 
    **Variables tab:**
    - `WORKER_URL` → your Worker URL from step 2, e.g. `https://pr-human-verify.yourname.workers.dev`
+   - `VERIFY_INTERNAL` → (optional) set to `true` to also require verification from repo members and collaborators. By default only external contributors are verified.
 
 3. **(Recommended)** Enforce via branch protection:
    **Settings → Branches → Add rule → Require status checks**
@@ -147,5 +168,6 @@ worker/
 
 .github/
   workflows/
-    pr-human-verify.yml   GitHub Action (handles /verify + token checks)
+    pr-human-verify.yml   Reusable workflow (all logic — reference this from other repos)
+    pr-verify.yml         Thin caller for this repo (declares triggers, calls the reusable workflow)
 ```
