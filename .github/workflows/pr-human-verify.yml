@@ -23,6 +23,7 @@ on:
 permissions:
   pull-requests: write
   statuses: write
+  issues: write
 
 env:
   WORKER_URL: ${{ vars.WORKER_URL }}
