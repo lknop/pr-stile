@@ -79,7 +79,6 @@ jobs:
     with:
       event_name: ${{ github.event_name }}
       worker_url: ${{ vars.WORKER_URL }}
-      verify_internal: ${{ vars.VERIFY_INTERNAL || 'false' }}
     secrets:
       HMAC_SECRET: ${{ secrets.HMAC_SECRET }}
 ```
@@ -88,7 +87,7 @@ In **Settings → Secrets and variables → Actions**, add:
 
 - Secret `HMAC_SECRET` — the hex string from step 1
 - Variable `WORKER_URL` — your Worker URL from step 2
-- Variable `VERIFY_INTERNAL` — set to `true` to require verification from repo members and collaborators as well (optional, default: external contributors only)
+To require verification from repo members and collaborators as well, add `verify_internal: 'true'` to the `with:` block (or `verify_internal: ${{ vars.VERIFY_INTERNAL || 'false' }}` if you want to control it via a repo variable).
 
 ### 5. Enforce via branch protection
 
