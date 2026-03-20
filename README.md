@@ -87,7 +87,7 @@ wrangler deploy                            # redeploy with the site key
 
    jobs:
      verify:
-       uses: lknop/pr-stile/.github/workflows/pr-human-verify.yml@main
+       uses: lknop/pr-stile/.github/workflows/pr-human-verify.yml@master
        with:
          event_name: ${{ github.event_name }}
          worker_url: ${{ vars.WORKER_URL }}
