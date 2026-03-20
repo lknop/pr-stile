@@ -1,161 +1,125 @@
 # 🔐 PR Human Verification
 
-Prevent automated/bot PRs by requiring a [Cloudflare Turnstile](https://www.cloudflare.com/products/turnstile/) human check. Zero cost, ~10 minute setup.
-
-**No Cloudflare tokens in GitHub. No GitHub tokens in Cloudflare.** The only shared secret is an HMAC key.
+Blocks automated PRs by making contributors complete a [Cloudflare Turnstile](https://www.cloudflare.com/products/turnstile/) CAPTCHA. Free, no external dependencies, ~10 minute setup.
 
 ---
 
-## How It Works
+## How it works
 
-```
-1. Contributor opens a PR
-   → GitHub Action sets commit status to "pending"
+When a PR is opened, the bot sets a pending commit status and asks the contributor to run `/verify`. They get a pre-filled link to a Cloudflare Worker page where they complete the CAPTCHA. The Worker signs a token with an HMAC key shared with the GitHub Action — no OAuth tokens cross between the two services. The contributor pastes the token as a PR comment, the Action checks the signature and a few fields (username, repo, PR number, 24h expiry), and sets the status to success.
 
-2. Contributor comments:  /verify
-   → Action replies with a personalized verification link
-
-3. Contributor clicks the link → Cloudflare Turnstile challenge
-   → Worker returns a signed HMAC token
-
-4. Contributor pastes the token as a PR comment
-   → Action verifies signature, username, repo, PR#, expiry
-   → Sets commit status to "success" ✅
-
-5. Branch protection enforces the "human-verified" status check
-```
+Repo members and collaborators are skipped by default and don't need to verify. You can change this with a repo variable.
 
 ---
 
-## Maintainer Setup
+## Setup
 
-### Prerequisites
+You'll need a free [Cloudflare account](https://dash.cloudflare.com/sign-up) and [Wrangler](https://developers.cloudflare.com/workers/wrangler/install-and-update/) (`npm install -g wrangler`).
 
-- A free [Cloudflare account](https://dash.cloudflare.com/sign-up)
-- [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/install-and-update/) (`npm install -g wrangler`)
-
-### 1. Generate HMAC secret (30 sec)
+### 1. Generate an HMAC secret
 
 ```bash
 openssl rand -hex 32
 ```
 
-Save the output — you need it in steps 2 and 4.
+Keep this — you'll use it in steps 2 and 4.
 
-### 2. Deploy the Cloudflare Worker (3 min)
+### 2. Deploy the Cloudflare Worker
 
-We deploy the Worker first so we know the exact hostname for Turnstile.
+Deploy first so you have the hostname to register with Turnstile.
 
 ```bash
 cd worker
 wrangler login
-wrangler secret put HMAC_SECRET   # paste hex string from step 1
+wrangler secret put HMAC_SECRET   # paste the hex string from step 1
 wrangler deploy
 ```
 
-Note the deployed URL (e.g. `https://pr-human-verify.yourname.workers.dev`).
-The page won't work yet (Turnstile isn't configured) — that's fine.
+Note your Worker URL, e.g. `https://pr-human-verify.yourname.workers.dev`. The page won't work yet — that's fine.
 
-### 3. Create a Turnstile widget (2 min)
+### 3. Set up Turnstile
 
-1. [Cloudflare Dashboard → Turnstile](https://dash.cloudflare.com/?to=/:account/turnstile)
-2. **Add site** → widget mode: **Managed**
-3. For **Domain**, enter your Worker hostname from step 2, e.g.:
-   `pr-human-verify.yourname.workers.dev`
-4. Copy the **Site Key** and **Secret Key**
-5. Now set them on the Worker:
+1. Go to [Cloudflare Dashboard → Turnstile](https://dash.cloudflare.com/?to=/:account/turnstile) and click **Add site**
+2. Widget mode: **Managed**, domain: your Worker hostname from step 2
+3. Copy the Site Key and Secret Key, then configure the Worker:
 
 ```bash
 cd worker
 # Edit wrangler.toml: set TURNSTILE_SITE_KEY to your Site Key
 wrangler secret put TURNSTILE_SECRET_KEY   # paste Secret Key
-wrangler deploy                            # redeploy with the site key
+wrangler deploy
 ```
 
-### 4. Add the GitHub Action to your repo (3 min)
+### 4. Add the workflow to your repo
 
-1. Create `.github/workflows/pr-human-verify.yml` in your repository with the following content:
+Create `.github/workflows/pr-human-verify.yml`:
 
-   ```yaml
-   name: PR Human Verification
+```yaml
+name: PR Human Verification
 
-   on:
-     pull_request:
-       types: [opened, reopened, synchronize]
-     issue_comment:
-       types: [created]
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+  issue_comment:
+    types: [created]
 
-   jobs:
-     verify:
-       uses: lknop/pr-stile/.github/workflows/pr-human-verify.yml@master
-       with:
-         event_name: ${{ github.event_name }}
-         worker_url: ${{ vars.WORKER_URL }}
-         verify_internal: ${{ vars.VERIFY_INTERNAL == 'true' }}
-       secrets:
-         HMAC_SECRET: ${{ secrets.HMAC_SECRET }}
-   ```
+jobs:
+  verify:
+    uses: lknop/pr-stile/.github/workflows/pr-human-verify.yml@master
+    with:
+      event_name: ${{ github.event_name }}
+      worker_url: ${{ vars.WORKER_URL }}
+      verify_internal: ${{ vars.VERIFY_INTERNAL == 'true' }}
+    secrets:
+      HMAC_SECRET: ${{ secrets.HMAC_SECRET }}
+```
 
-2. Go to **Settings → Secrets and variables → Actions** and add:
+Then in **Settings → Secrets and variables → Actions**, add:
 
-   **Secrets tab:**
-   - `HMAC_SECRET` → the hex string from step 1
+- Secret `HMAC_SECRET` — the hex string from step 1
+- Variable `WORKER_URL` — your Worker URL from step 2
+- Variable `VERIFY_INTERNAL` — set to `true` if you want to require verification from members and collaborators too (optional)
 
-   **Variables tab:**
-   - `WORKER_URL` → your Worker URL from step 2, e.g. `https://pr-human-verify.yourname.workers.dev`
-   - `VERIFY_INTERNAL` → (optional) set to `true` to also require verification from repo members and collaborators. By default only external contributors are verified.
-
-3. **(Recommended)** Enforce via branch protection:
-   **Settings → Branches → Add rule → Require status checks**
-   - Search for and add: `human-verified`
+To actually block merging, go to **Settings → Branches → Add rule → Require status checks** and add `human-verified`.
 
 ---
 
-## Contributor Experience
+## What contributors see
 
 ```
-Contributor:  Opens PR
-Bot:          ⏳ Status: "Comment /verify on this PR to prove you're human"
+Bot:          @contributor This PR requires human verification.
+              Please comment `/verify` to get started.
 
 Contributor:  /verify
+
 Bot:          🔐 Human Verification
               @contributor, please complete the verification:
-              1. Click here to verify  ← (link with pre-filled username/repo/PR)
+              1. Click here to verify  ← pre-filled link
               2. Complete the Turnstile challenge
-              3. Copy the token and paste it as a new comment on this PR
+              3. Paste the token as a new comment
 
 Contributor:  pr-verify:eyJ1Ijoib2N0b2N...
+
 Bot:          ✅ @contributor has been verified as human. Thank you!
-              Status: "success"
 ```
 
----
-
-## Security Properties
-
-- **HMAC-SHA256 signed tokens** — can't be forged without the shared secret
-- **Bound to username + repo + PR number** — a token for one PR can't be reused on another
-- **24-hour expiry** — stale tokens are rejected
-- **Author-only** — only the PR author can submit `/verify` or a token
-- **No cross-service credentials** — Cloudflare never touches GitHub, GitHub never touches Cloudflare
+The `/verify` exchange is cleaned up after a successful verification.
 
 ---
 
-## Sharing One Worker Across Repos
+## Sharing one Worker across repos
 
-Deploy the Worker once and reuse it across any number of repos. Each repo just
-needs the workflow file and the `HMAC_SECRET` secret. If you want all repos to
-share the same HMAC secret, you can set it as an **organization secret** in GitHub.
+Deploy the Worker once and point as many repos at it as you like — each repo just needs the workflow and the `HMAC_SECRET`. For org-wide use, set `HMAC_SECRET` as an organization secret so you don't have to repeat it everywhere.
 
 ---
 
 ## Cost
 
-| Service              | Free Tier              |
+| Service              | Free tier              |
 |----------------------|------------------------|
 | Cloudflare Workers   | 100,000 requests/day   |
 | Cloudflare Turnstile | Unlimited              |
-| GitHub Actions       | 2,000 min/month (private), unlimited (public) |
+| GitHub Actions       | 2,000 min/month (private repos), unlimited (public) |
 
 ---
 
@@ -163,11 +127,10 @@ share the same HMAC secret, you can set it as an **organization secret** in GitH
 
 ```
 worker/
-  src/index.js       Cloudflare Worker (serves page + signing API)
-  wrangler.toml      Worker configuration
+  src/index.js       Cloudflare Worker — serves the verification page and signs tokens
+  wrangler.toml      Worker config
 
-.github/
-  workflows/
-    pr-human-verify.yml   Reusable workflow (all logic — reference this from other repos)
-    pr-verify.yml         Thin caller for this repo (declares triggers, calls the reusable workflow)
+.github/workflows/
+  pr-human-verify.yml   Reusable workflow with all the logic — reference this from other repos
+  pr-verify.yml         Caller workflow for this repo
 ```
