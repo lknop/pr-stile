@@ -1,0 +1,10 @@
+name = "pr-human-verify"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+
+[vars]
+TURNSTILE_SITE_KEY = "YOUR_TURNSTILE_SITE_KEY"
+
+# Secrets (set via CLI, NOT here):
+#   wrangler secret put TURNSTILE_SECRET_KEY
+#   wrangler secret put HMAC_SECRET

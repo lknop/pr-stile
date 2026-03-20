@@ -1,0 +1,210 @@
+# .github/workflows/pr-human-verify.yml
+#
+# Prevents automated PRs by requiring a Cloudflare Turnstile human check.
+#
+# Flow:
+#   1. PR opened → bot sets "pending" status with instructions
+#   2. User comments "/verify" → bot replies with a pre-filled Turnstile link
+#   3. User completes challenge, gets a token, pastes it as a PR comment
+#   4. Bot verifies the HMAC token and sets status to "success"
+#
+# Required setup (all in repo Settings → Secrets and variables → Actions):
+#   - Secret:   HMAC_SECRET   (same value used in the Cloudflare Worker)
+#   - Variable: WORKER_URL    (your deployed Worker URL, e.g. https://pr-human-verify.you.workers.dev)
+
+name: PR Human Verification
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+  issue_comment:
+    types: [created]
+
+permissions:
+  pull-requests: write
+  statuses: write
+
+env:
+  WORKER_URL: ${{ vars.WORKER_URL }}
+
+jobs:
+  # ── On PR open: set pending status with instructions ─────────────────────
+  pr-opened:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set pending status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const sha = context.payload.pull_request.head.sha;
+
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha,
+              state: "pending",
+              context: "human-verified",
+              description: "Comment /verify on this PR to prove you're human",
+              target_url: process.env.WORKER_URL,
+            });
+
+  # ── On comment: handle /verify command or token validation ───────────────
+  pr-comment:
+    if: >
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request
+    runs-on: ubuntu-latest
+    steps:
+      - name: Handle comment
+        uses: actions/github-script@v7
+        env:
+          HMAC_SECRET: ${{ secrets.HMAC_SECRET }}
+        with:
+          script: |
+            const crypto = require("crypto");
+            const comment = context.payload.comment;
+            const body = comment.body.trim();
+            const prNumber = context.payload.issue.number;
+            const repoFullName = context.payload.repository.full_name;
+
+            // Fetch PR details (need head SHA)
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+            const headSha = pr.head.sha;
+            const prAuthor = pr.user.login.toLowerCase();
+
+            // ── Handle /verify command ──
+            if (body.toLowerCase() === "/verify") {
+              const workerUrl = process.env.WORKER_URL;
+              const commenter = comment.user.login;
+
+              // Only the PR author should verify
+              if (commenter.toLowerCase() !== prAuthor) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: prNumber,
+                  body: `@${commenter} Only the PR author (@${pr.user.login}) can verify this PR.`,
+                });
+                return;
+              }
+
+              const link = `${workerUrl}/?username=${encodeURIComponent(commenter)}&repo=${encodeURIComponent(repoFullName)}&pr=${prNumber}`;
+
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: [
+                  `### 🔐 Human Verification`,
+                  ``,
+                  `@${commenter}, please complete the verification:`,
+                  ``,
+                  `1. **[Click here to verify](${link})**`,
+                  `2. Complete the Turnstile challenge`,
+                  `3. Copy the token and paste it as a new comment on this PR`,
+                  ``,
+                  `The token will be valid for 24 hours.`,
+                ].join("\n"),
+              });
+              return;
+            }
+
+            // ── Handle token verification ──
+            const TOKEN_REGEX = /pr-verify:([A-Za-z0-9+/=]+)/;
+            const match = body.match(TOKEN_REGEX);
+            if (!match) return; // Not a verify command or token, ignore
+
+            const commenter = comment.user.login.toLowerCase();
+
+            // Only tokens from the PR author count
+            if (commenter !== prAuthor) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: `@${comment.user.login} Only the PR author can submit verification tokens.`,
+              });
+              return;
+            }
+
+            const MAX_AGE_SECONDS = 86400; // 24 hours
+            const now = Math.floor(Date.now() / 1000);
+
+            try {
+              const decoded = JSON.parse(
+                Buffer.from(match[1], "base64").toString("utf-8")
+              );
+              const { u, r, pr: tokenPr, ts, sig } = decoded;
+
+              // Reconstruct payload and verify HMAC
+              const payload = JSON.stringify({ u, r, pr: tokenPr, ts });
+              const expectedSig = crypto
+                .createHmac("sha256", process.env.HMAC_SECRET)
+                .update(payload)
+                .digest("base64");
+
+              let error = null;
+
+              if (sig !== expectedSig) {
+                error = "Invalid token signature.";
+              } else if (u !== prAuthor) {
+                error = `Token was issued for **${u}**, but PR author is **${prAuthor}**.`;
+              } else if (r !== repoFullName.toLowerCase()) {
+                error = `Token was issued for a different repository.`;
+              } else if (tokenPr !== prNumber) {
+                error = `Token was issued for PR #${tokenPr}, not this PR.`;
+              } else if (now - ts > MAX_AGE_SECONDS) {
+                error = "Token has expired (older than 24 hours). Please `/verify` again.";
+              }
+
+              if (error) {
+                await github.rest.repos.createCommitStatus({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  sha: headSha,
+                  state: "pending",
+                  context: "human-verified",
+                  description: error.substring(0, 140),
+                  target_url: process.env.WORKER_URL,
+                });
+
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: prNumber,
+                  body: `❌ Verification failed: ${error}`,
+                });
+                return;
+              }
+
+              // ✅ Success!
+              await github.rest.repos.createCommitStatus({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                sha: headSha,
+                state: "success",
+                context: "human-verified",
+                description: "PR author verified as human",
+                target_url: process.env.WORKER_URL,
+              });
+
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: `✅ @${comment.user.login} has been verified as human. Thank you!`,
+              });
+
+            } catch (e) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: "❌ Could not decode verification token. Please try `/verify` again.",
+              });
+            }
