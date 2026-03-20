@@ -23,6 +23,7 @@ on:
 permissions:
   pull-requests: write
   statuses: write
+  issues: write
 
 env:
   WORKER_URL: ${{ vars.WORKER_URL }}
@@ -51,12 +52,15 @@ jobs:
               target_url: process.env.WORKER_URL,
             });
 
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: prNumber,
-              body: `@${author} This PR requires human verification. Please comment \`/verify\` to get started.`,
-            });
+            // Only comment on first open, not on every push
+            if (context.payload.action === "opened") {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: `@${author} This PR requires human verification. Please comment \`/verify\` to get started.`,
+              });
+            }
 
   # ── On comment: handle /verify command or token validation ───────────────
   pr-comment:
@@ -201,6 +205,26 @@ jobs:
                 description: "PR author verified as human",
                 target_url: process.env.WORKER_URL,
               });
+
+              // Delete verification noise: /verify command, bot's link reply, and token comment
+              const { data: allComments } = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                per_page: 100,
+              });
+              for (const c of allComments) {
+                const isVerifyCmd = c.body.trim().toLowerCase() === "/verify";
+                const isBotLink = c.user.login === "github-actions[bot]" && c.body.includes("🔐 Human Verification");
+                const isToken = /pr-verify:[A-Za-z0-9+/=]+/.test(c.body);
+                if (isVerifyCmd || isBotLink || isToken) {
+                  await github.rest.issues.deleteComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    comment_id: c.id,
+                  });
+                }
+              }
 
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
