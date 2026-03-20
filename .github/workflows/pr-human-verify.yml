@@ -14,7 +14,7 @@
 #       with:
 #         event_name: ${{ github.event_name }}
 #         worker_url: ${{ vars.WORKER_URL }}
-#         verify_internal: ${{ vars.VERIFY_INTERNAL == 'true' }}
+#         verify_internal: ${{ vars.VERIFY_INTERNAL }}
 #       secrets:
 #         HMAC_SECRET: ${{ secrets.HMAC_SECRET }}
 #
@@ -37,9 +37,9 @@ on:
         type: string
         required: true
       verify_internal:
-        description: Require verification from repo members and collaborators too
-        type: boolean
-        default: false
+        description: Set to 'true' to require verification from repo members and collaborators too
+        type: string
+        default: 'false'
     secrets:
       HMAC_SECRET:
         required: true

@@ -69,7 +69,7 @@ jobs:
     with:
       event_name: ${{ github.event_name }}
       worker_url: ${{ vars.WORKER_URL }}
-      verify_internal: ${{ vars.VERIFY_INTERNAL == 'true' }}
+      verify_internal: ${{ vars.VERIFY_INTERNAL }}
     secrets:
       HMAC_SECRET: ${{ secrets.HMAC_SECRET }}
 ```
