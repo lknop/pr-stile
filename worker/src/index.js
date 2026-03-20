@@ -234,7 +234,9 @@ function HTML_PAGE(siteKey) {
       '<div class="prefilled">' +
         '<span class="label">User:</span> <span class="value">' + esc(username) + "</span><br>" +
         '<span class="label">Repo:</span> <span class="value">' + esc(repo) + "</span><br>" +
-        '<span class="label">PR:</span> <span class="value">#' + esc(pr) + "</span>" +
+        '<span class="label">PR:</span> <span class="value">' +
+          '<a href="https://github.com/' + esc(repo) + "/pull/" + esc(pr) + '" target="_blank">#' + esc(pr) + "</a>" +
+        "</span>" +
       "</div>" +
       '<div class="turnstile-box">' +
         '<div class="cf-turnstile" data-sitekey="${siteKey}" data-theme="dark" data-callback="onTurnstile"></div>' +

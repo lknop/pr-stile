@@ -71,6 +71,32 @@ jobs:
             const TRUSTED = ["OWNER", "MEMBER", "COLLABORATOR"];
             if (process.env.VERIFY_INTERNAL !== "true" && TRUSTED.includes(association)) return;
 
+            // On synchronize, carry forward a previous success rather than resetting
+            if (context.payload.action === "synchronize") {
+              const prevSha = context.payload.before;
+              const { data: statuses } = await github.rest.repos.listCommitStatusesForRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: prevSha,
+                per_page: 100,
+              });
+              const alreadyVerified = statuses.some(
+                s => s.context === "human-verified" && s.state === "success"
+              );
+              if (alreadyVerified) {
+                await github.rest.repos.createCommitStatus({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  sha,
+                  state: "success",
+                  context: "human-verified",
+                  description: "PR author verified as human",
+                  target_url: process.env.WORKER_URL,
+                });
+                return;
+              }
+            }
+
             await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
